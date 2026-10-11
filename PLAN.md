@@ -296,7 +296,7 @@ stays green.
 > **Preamble for every task below.** Each task is written to be pasted into a
 > single `codex "..."` invocation. Prepend this to each:
 >
-> *"Repo: `/Users/uiseo/Documents/research/cheoyong` — a small, framework-
+> *"Repo: `cheoyong` — a small, framework-
 > agnostic Python library that sits between an LLM agent's decision to call a
 > tool and the tool executing, and returns an allow/deny/escalate Decision based
 > on policies over `(tool_name, args, context)`. Python 3.11+, `pytest`, package
