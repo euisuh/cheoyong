@@ -2,10 +2,10 @@ from io import StringIO
 
 import pytest
 
-from toolwall.audit import AuditLog
-from toolwall.engine import Toolwall, cli_confirm
-from toolwall.policies import arg_rules, sensitive
-from toolwall.types import Effect, ToolCall
+from cheoyong.audit import AuditLog
+from cheoyong.engine import Cheoyong, cli_confirm
+from cheoyong.policies import arg_rules, sensitive
+from cheoyong.types import Effect, ToolCall
 
 
 def test_sensitive_returns_escalate_without_matching_other_tools() -> None:
@@ -17,7 +17,7 @@ def test_sensitive_returns_escalate_without_matching_other_tools() -> None:
 
 def test_default_auto_deny_records_escalation() -> None:
     audit = AuditLog()
-    decision = Toolwall(
+    decision = Cheoyong(
         [sensitive(["submit_order"])], default=Effect.ALLOW, audit=audit
     ).check("submit_order", {"sku": "X"})
 
@@ -28,7 +28,7 @@ def test_default_auto_deny_records_escalation() -> None:
 
 def test_literal_true_approves_and_records_escalation() -> None:
     audit = AuditLog()
-    decision = Toolwall(
+    decision = Cheoyong(
         [sensitive(["submit_order"])],
         default=Effect.DENY,
         audit=audit,
@@ -43,7 +43,7 @@ def test_literal_true_approves_and_records_escalation() -> None:
 @pytest.mark.parametrize("result", ["yes", 1, None, False])
 def test_non_literal_true_denies(result) -> None:
     audit = AuditLog()
-    decision = Toolwall(
+    decision = Cheoyong(
         [sensitive(["submit_order"])],
         default=Effect.ALLOW,
         audit=audit,
@@ -59,7 +59,7 @@ def test_callback_exception_denies_and_is_audited() -> None:
         raise RuntimeError("approval unavailable")
 
     audit = AuditLog()
-    decision = Toolwall(
+    decision = Cheoyong(
         [sensitive(["submit_order"])],
         default=Effect.ALLOW,
         audit=audit,
@@ -78,7 +78,7 @@ def test_arg_deny_never_invokes_callback_in_either_order(sensitive_first) -> Non
     deny = arg_rules({"send_email": {"to": {"required": True}}})
     escalate = sensitive(["send_email"])
     policies = [escalate, deny] if sensitive_first else [deny, escalate]
-    decision = Toolwall(
+    decision = Cheoyong(
         policies,
         default=Effect.ALLOW,
         audit=audit,

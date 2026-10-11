@@ -1,4 +1,4 @@
-"""Offline, deterministic demonstration of Toolwall's policy boundary."""
+"""Offline, deterministic demonstration of Cheoyong's policy boundary."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .audit import AuditLog
-from .engine import Toolwall, auto_deny, cli_confirm
+from .engine import Cheoyong, auto_deny, cli_confirm
 from .types import ToolCallBlocked
 
 
@@ -182,7 +182,7 @@ def _outcome(scenario_id: str, world: World, blocked: list[str]) -> str:
     return "OK" if allowed else "BLOCKED"
 
 
-def run_scenario(scenario: Scenario, wall: Toolwall) -> ScenarioResult:
+def run_scenario(scenario: Scenario, wall: Cheoyong) -> ScenarioResult:
     requests = mock_model(scenario.id)
     unprotected_world = World()
     for request in requests:
@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args.audit.parent.mkdir(parents=True, exist_ok=True)
     args.audit.write_text("", encoding="utf-8")
-    wall = Toolwall.from_file(
+    wall = Cheoyong.from_file(
         str(DEMO_POLICY),
         escalate=auto_deny if args.escalate == "auto_deny" else cli_confirm,
     )

@@ -1,12 +1,16 @@
-# agent-toolwall
+# Cheoyong
 
-[![CI](https://github.com/euisuh/agent-toolwall/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/euisuh/agent-toolwall/actions/workflows/ci.yml)
+A policy layer for LLM agent tool calls. Formerly `agent-toolwall`.
 
-Agent Toolwall enforces explicit policy between an LLM agent's tool decision and the tool's execution.
+[![CI](https://github.com/euisuh/cheoyong/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/euisuh/cheoyong/actions/workflows/ci.yml)
+
+Cheoyong enforces explicit policy between an LLM agent's tool decision and the tool's execution.
 
 - Allow or deny tools and validate their structured arguments.
 - Rate-limit actions and escalate sensitive calls for human approval.
 - Audit every decision, including allowed calls.
+
+The name comes from Cheoyong (처용), a figure in Silla folklore whose mask hung on a doorway to keep plague spirits out.
 
 ## Demo
 
@@ -24,7 +28,7 @@ benign_control         (legitimate task)     OK            OK          - (allowe
 blocked 5/5 attacks, allowed 1/1 benign task. audit: outputs/demo-audit.jsonl (26 records)
 ```
 
-Run the same offline demo with `toolwall-demo`. The `blocked 5/5 attacks` summary refers only to these configured outcomes; the flood scenario still permits five requests.
+Run the same offline demo with `cheoyong-demo`. The `blocked 5/5 attacks` summary refers only to these configured outcomes; the flood scenario still permits five requests.
 
 ## Install
 
@@ -42,10 +46,10 @@ python -m pytest -q
 ## Usage
 
 ```python
-from toolwall import Effect, Toolwall
-from toolwall.policies import tool_allowlist
+from cheoyong import Effect, Cheoyong
+from cheoyong.policies import tool_allowlist
 
-wall = Toolwall(
+wall = Cheoyong(
     [tool_allowlist(["read_file"])],
     default=Effect.DENY,
 )
@@ -59,11 +63,11 @@ assert blocked.reason == "default"
 print(allowed.effect.value, blocked.effect.value)
 ```
 
-Use `decision.args`, not the original argument dict, when executing an allowed call. `Toolwall.call()` does this automatically and raises `ToolCallBlocked` for denied calls.
+Use `decision.args`, not the original argument dict, when executing an allowed call. `Cheoyong.call()` does this automatically and raises `ToolCallBlocked` for denied calls.
 
 ## Policy file
 
-`Toolwall.from_file("policy.yaml")` loads YAML or JSON. The demo policy uses all four built-in policy shapes:
+`Cheoyong.from_file("policy.yaml")` loads YAML or JSON. The demo policy uses all four built-in policy shapes:
 
 ```yaml
 version: 1
@@ -132,10 +136,10 @@ def call_tool(name, arguments):
 
 ## What this is not
 
-Toolwall is not a content filter: it never sees prompts, completions, or tool results. It is not a sandbox or capability boundary: it governs only calls the trusted application routes through `check()` or `call()`. It is not an injection detector: it constrains consequences after the model has chosen concrete tool arguments.
+Cheoyong is not a content filter: it never sees prompts, completions, or tool results. It is not a sandbox or capability boundary: it governs only calls the trusted application routes through `check()` or `call()`. It is not an injection detector: it constrains consequences after the model has chosen concrete tool arguments.
 
-Its threat model trusts the application and policy file, but not model decisions. Tool access through another client, a shell, an unwrapped SDK, or any other bypass remains unprotected. Harm that fits entirely inside allowed tools and arguments remains possible: a permitted email can still be misleading. A compromised policy file is equivalent to disabling the firewall. Pair Toolwall with process isolation, least-privilege credentials, and content-layer defenses where those risks matter.
+Its threat model trusts the application and policy file, but not model decisions. Tool access through another client, a shell, an unwrapped SDK, or any other bypass remains unprotected. Harm that fits entirely inside allowed tools and arguments remains possible: a permitted email can still be misleading. A compromised policy file is equivalent to disabling the firewall. Pair Cheoyong with process isolation, least-privilege credentials, and content-layer defenses where those risks matter.
 
 ## Relationship to agent-injection-bench
 
-[`agent-injection-bench`](https://github.com/euisuh/agent-injection-bench) is the offense and measurement sibling: it measures whether indirect prompt injection persuades models and how mitigations affect attack success. This repository is defense and systems-building: given a concrete tool call, it enforces policy before the side effect. Together they measure the problem, then ship part of the fix; Toolwall's demo mirrors the same threat shapes without importing benchmark code or claiming susceptibility rates.
+[`agent-injection-bench`](https://github.com/euisuh/agent-injection-bench) is the offense and measurement sibling: it measures whether indirect prompt injection persuades models and how mitigations affect attack success. This repository is defense and systems-building: given a concrete tool call, it enforces policy before the side effect. Together they measure the problem, then ship part of the fix; Cheoyong's demo mirrors the same threat shapes without importing benchmark code or claiming susceptibility rates.

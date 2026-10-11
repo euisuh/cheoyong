@@ -1,9 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
-from toolwall.engine import Toolwall
-from toolwall.policies import arg_rules, rate_limit
-from toolwall.types import Effect
+from cheoyong.engine import Cheoyong
+from cheoyong.policies import arg_rules, rate_limit
+from cheoyong.types import Effect
 
 
 class Clock:
@@ -15,7 +15,7 @@ class Clock:
 
 
 def wall(max_calls=3, per_seconds=60, *, clock=None, key=()):
-    return Toolwall(
+    return Cheoyong(
         [rate_limit("send", max_calls, per_seconds, key, clock or Clock())],
         default=Effect.ALLOW,
     )
@@ -47,7 +47,7 @@ def test_advancing_clock_past_window_reallows():
 
 def test_calls_denied_by_earlier_policy_do_not_consume_budget():
     clock = Clock()
-    limiter = Toolwall(
+    limiter = Cheoyong(
         [
             arg_rules({"send": {"to": {"required": True}}}),
             rate_limit("send", 3, 60, clock=clock),

@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from toolwall import Effect, PolicyError, Toolwall, load_policy_file
-from toolwall.loader import main
-from toolwall.policies import (
+from cheoyong import Effect, PolicyError, Cheoyong, load_policy_file
+from cheoyong.loader import main
+from cheoyong.policies import (
     arg_rules,
     rate_limit,
     sensitive,
@@ -31,8 +31,8 @@ def assert_rejected(tmp_path: Path, data, key_path: str) -> None:
 
 
 def test_emitted_policy_order_matches_contract() -> None:
-    policies, default, audit = load_policy_file("toolwall/demo_policy.yaml")
-    assert [policy._toolwall_name for policy in policies] == [
+    policies, default, audit = load_policy_file("cheoyong/demo_policy.yaml")
+    assert [policy._cheoyong_name for policy in policies] == [
         "arg_rules:*",
         "tool_allowlist:read_file,http_get,send_email,submit_order,write_file",
         "arg_rules:read_file,http_get,send_email,write_file",
@@ -44,8 +44,8 @@ def test_emitted_policy_order_matches_contract() -> None:
 
 
 def test_round_trip_matches_hand_constructed_engine() -> None:
-    loaded = Toolwall.from_file("toolwall/demo_policy.yaml", escalate=lambda *_: True)
-    hand = Toolwall(
+    loaded = Cheoyong.from_file("cheoyong/demo_policy.yaml", escalate=lambda *_: True)
+    hand = Cheoyong(
         [
             arg_rules({"*": {"*": {"denies": "CANARY-[0-9A-F]{4}"}}}),
             tool_allowlist(
@@ -119,7 +119,7 @@ def test_allow_false_emits_denylist(tmp_path: Path) -> None:
         tmp_path,
         {"version": 1, "default": "allow", "tools": {"shell": {"allow": False}}},
     )
-    wall = Toolwall.from_file(path)
+    wall = Cheoyong.from_file(path)
     assert wall.check("shell", {}).effect is Effect.DENY
     assert wall.check("other", {}).effect is Effect.ALLOW
 
@@ -193,20 +193,20 @@ def test_unsupported_type_rejected_with_path(tmp_path: Path) -> None:
     assert_rejected(tmp_path, data, "tools.order.args.qty.type")
 
 
-def test_invalid_yaml_refuses_to_construct_toolwall(tmp_path: Path, monkeypatch) -> None:
+def test_invalid_yaml_refuses_to_construct_cheoyong(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "policy.yaml"
     path.write_text("tools: [", encoding="utf-8")
     constructed = False
-    original = Toolwall.__init__
+    original = Cheoyong.__init__
 
     def spy(self, *args, **kwargs):
         nonlocal constructed
         constructed = True
         original(self, *args, **kwargs)
 
-    monkeypatch.setattr(Toolwall, "__init__", spy)
+    monkeypatch.setattr(Cheoyong, "__init__", spy)
     with pytest.raises(PolicyError, match=r"\$"):
-        Toolwall.from_file(path)
+        Cheoyong.from_file(path)
     assert constructed is False
 
 
@@ -242,8 +242,8 @@ def test_json_and_yaml_load_identically(tmp_path: Path) -> None:
     yaml_path = write_yaml(tmp_path, data)
     json_path = tmp_path / "policy.json"
     json_path.write_text(json.dumps(data), encoding="utf-8")
-    yaml_wall = Toolwall.from_file(yaml_path)
-    json_wall = Toolwall.from_file(json_path)
+    yaml_wall = Cheoyong.from_file(yaml_path)
+    json_wall = Cheoyong.from_file(json_path)
     for tool, args in [
         ("read_file", {"path": "/workspace/a"}),
         ("read_file", {"path": "/etc/a"}),

@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agent-toolwall"
+name = "cheoyong"
 version = "0.1.0"
 description = "Policy enforcement between an LLM agent and its tools"
 readme = "README.md"
@@ -12,13 +12,13 @@ license = "MIT"
 dependencies = ["pyyaml>=6"]
 
 [project.scripts]
-toolwall-demo = "toolwall.demo:main"
+cheoyong-demo = "cheoyong.demo:main"
 
 [project.optional-dependencies]
 dev = ["pytest"]
 
 [project.urls]
-Repository = "https://github.com/euisuh/agent-toolwall"
+Repository = "https://github.com/euisuh/cheoyong"
 
 [tool.hatch.build.targets.wheel]
-packages = ["toolwall"]
+packages = ["cheoyong"]

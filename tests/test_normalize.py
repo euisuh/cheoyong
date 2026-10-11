@@ -1,9 +1,9 @@
-from toolwall import Effect, Toolwall
-from toolwall.policies import arg_rules
+from cheoyong import Effect, Cheoyong
+from cheoyong.policies import arg_rules
 
 
 def wall(rules):
-    return Toolwall([arg_rules(rules)], default=Effect.ALLOW)
+    return Cheoyong([arg_rules(rules)], default=Effect.ALLOW)
 
 
 def test_tool_name_nfkc_and_casefold_hits_send_email_rule() -> None:
