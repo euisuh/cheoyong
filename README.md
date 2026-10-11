@@ -140,6 +140,6 @@ Cheoyong is not a content filter: it never sees prompts, completions, or tool re
 
 Its threat model trusts the application and policy file, but not model decisions. Tool access through another client, a shell, an unwrapped SDK, or any other bypass remains unprotected. Harm that fits entirely inside allowed tools and arguments remains possible: a permitted email can still be misleading. A compromised policy file is equivalent to disabling the firewall. Pair Cheoyong with process isolation, least-privilege credentials, and content-layer defenses where those risks matter.
 
-## Relationship to agent-injection-bench
+## Relationship to gumiho
 
-[`agent-injection-bench`](https://github.com/euisuh/agent-injection-bench) is the offense and measurement sibling: it measures whether indirect prompt injection persuades models and how mitigations affect attack success. This repository is defense and systems-building: given a concrete tool call, it enforces policy before the side effect. Together they measure the problem, then ship part of the fix; Cheoyong's demo mirrors the same threat shapes without importing benchmark code or claiming susceptibility rates.
+[`gumiho`](https://github.com/euisuh/gumiho) is the offense and measurement sibling: it measures whether indirect prompt injection persuades models and how mitigations affect attack success. This repository is defense and systems-building: given a concrete tool call, it enforces policy before the side effect. Together they measure the problem, then ship part of the fix; Cheoyong's demo mirrors the same threat shapes without importing benchmark code or claiming susceptibility rates.
