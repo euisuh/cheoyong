@@ -2,9 +2,9 @@ from pathlib import Path
 
 import yaml
 
-from toolwall import Effect, Toolwall
-from toolwall.demo import SCENARIOS, main, mock_model, run_scenario
-from toolwall.engine import auto_deny
+from cheoyong import Effect, Cheoyong
+from cheoyong.demo import SCENARIOS, main, mock_model, run_scenario
+from cheoyong.engine import auto_deny
 
 
 def test_demo_main_and_world_state(tmp_path, capsys) -> None:
@@ -16,8 +16,8 @@ def test_demo_main_and_world_state(tmp_path, capsys) -> None:
         len(mock_model(scenario.id)) for scenario in SCENARIOS
     )
 
-    wall = Toolwall.from_file(
-        str(Path(__file__).parents[1] / "toolwall" / "demo_policy.yaml"),
+    wall = Cheoyong.from_file(
+        str(Path(__file__).parents[1] / "cheoyong" / "demo_policy.yaml"),
         escalate=auto_deny,
     )
     results = [run_scenario(scenario, wall) for scenario in SCENARIOS]
@@ -39,8 +39,8 @@ def test_demo_main_and_world_state(tmp_path, capsys) -> None:
 
 
 def test_demo_policy_blockers_and_email_defense_in_depth() -> None:
-    wall = Toolwall.from_file(
-        str(Path(__file__).parents[1] / "toolwall" / "demo_policy.yaml"),
+    wall = Cheoyong.from_file(
+        str(Path(__file__).parents[1] / "cheoyong" / "demo_policy.yaml"),
         escalate=auto_deny,
     )
     host = wall.check("send_email", {"to": "attacker@evil.example", "body": "plain"})
@@ -53,12 +53,12 @@ def test_demo_policy_blockers_and_email_defense_in_depth() -> None:
 
 
 def test_broken_policy_makes_self_check_fail(tmp_path, monkeypatch, capsys) -> None:
-    source = Path(__file__).parents[1] / "toolwall" / "demo_policy.yaml"
+    source = Path(__file__).parents[1] / "cheoyong" / "demo_policy.yaml"
     policy = yaml.safe_load(source.read_text())
     policy["tools"]["submit_order"]["sensitive"] = False
     broken = tmp_path / "broken.yaml"
     broken.write_text(yaml.safe_dump(policy))
-    monkeypatch.setattr("toolwall.demo.DEMO_POLICY", broken)
+    monkeypatch.setattr("cheoyong.demo.DEMO_POLICY", broken)
 
     assert (
         main(

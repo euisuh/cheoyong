@@ -140,7 +140,7 @@ def _load(path: Path) -> dict[str, Any]:
 
 
 def _named(policy: Policy, name: str) -> Policy:
-    setattr(policy, "_toolwall_name", name)
+    setattr(policy, "_cheoyong_name", name)
     return policy
 
 
@@ -252,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         print(exc, file=sys.stderr)
         return 1
     for policy in policies:
-        print(getattr(policy, "_toolwall_name"))
+        print(getattr(policy, "_cheoyong_name"))
     return 0
 
 

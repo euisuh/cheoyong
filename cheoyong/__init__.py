@@ -1,4 +1,4 @@
-from .engine import Toolwall
+from .engine import Cheoyong
 from .types import Decision, Effect, PolicyError, ToolCall, ToolCallBlocked
 
 __version__ = "0.1.0"
@@ -15,7 +15,7 @@ __all__ = [
     "PolicyError",
     "ToolCall",
     "ToolCallBlocked",
-    "Toolwall",
+    "Cheoyong",
     "__version__",
     "load_policy_file",
 ]
