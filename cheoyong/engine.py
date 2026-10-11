@@ -33,7 +33,7 @@ def cli_confirm(call: ToolCall, decision: Decision) -> bool:
     return sys.stdin.readline().strip().casefold() in {"y", "yes"}
 
 
-class Toolwall:
+class Cheoyong:
     """Evaluate policies in order and fail closed on policy errors.
 
     Args are copied before evaluation. Decisions thread replacement args to later
@@ -66,7 +66,7 @@ class Toolwall:
         cls,
         path: str,
         escalate: Callable[[ToolCall, Decision], bool] | None = None,
-    ) -> "Toolwall":
+    ) -> "Cheoyong":
         from .loader import load_policy_file
 
         policies, default, audit = load_policy_file(path)
@@ -179,7 +179,7 @@ class Toolwall:
                         "ts": datetime.now(UTC).isoformat(timespec="milliseconds").replace(
                             "+00:00", "Z"
                         ),
-                        "toolwall_version": __version__,
+                        "cheoyong_version": __version__,
                         "tool": tool,
                         "args": incoming_args,
                         "context": copied_context,

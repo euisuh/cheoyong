@@ -27,4 +27,4 @@ jobs:
         run: python -m pytest -q
       - name: Run installed offline demo
         working-directory: ${{ runner.temp }}
-        run: toolwall-demo
+        run: cheoyong-demo

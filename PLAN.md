@@ -1,4 +1,4 @@
-# agent-toolwall — Implementation Plan (v1)
+# cheoyong — Implementation Plan (v1)
 
 Status: plan of record. Version 0.1.0 target. Written 2026-08-19.
 Execution model: each milestone below is a self-contained task intended to be
@@ -22,7 +22,7 @@ what was attempted. Every mitigation for indirect prompt injection that operates
 *before* this point (delimiting, datamarking, detectors) is probabilistic: it
 tries to stop the model from being persuaded. The check at this point is not
 probabilistic — the arguments are already concrete and structured, and a policy
-over them either matches or does not. `agent-toolwall` is a small, framework-
+over them either matches or does not. `cheoyong` is a small, framework-
 agnostic library that occupies that gap: it turns "the agent wants to call tool
 T with args A" into an explicit `Decision` (allow / deny / escalate), enforces
 allow-lists, argument constraints, and rate limits, routes sensitive actions to
@@ -33,10 +33,10 @@ decision including the allowed ones.
 
 | Work | What it does | Relationship here |
 |---|---|---|
-| Guardrails AI, NeMo Guardrails, Rebuff | Validate/filter LLM *text* — input prompts, output content, conversational rails | Reused: the interception-point idea (a library that sits in the loop and can refuse). Different: toolwall never sees model text. Its entire input is `(tool_name, args, context)` after the model has decided, before the effect. Content filtering is explicitly out of scope (§10). |
+| Guardrails AI, NeMo Guardrails, Rebuff | Validate/filter LLM *text* — input prompts, output content, conversational rails | Reused: the interception-point idea (a library that sits in the loop and can refuse). Different: cheoyong never sees model text. Its entire input is `(tool_name, args, context)` after the model has decided, before the effect. Content filtering is explicitly out of scope (§10). |
 | OPA / Open Policy Agent, casbin | General-purpose policy engines; Rego or model/matcher files; often an out-of-process sidecar | Reused: allow/deny policy shape, default-deny posture, decision logging as a first-class output. Different: no policy DSL and no sidecar. Policies are Python callables; the YAML file is a thin surface over four built-in rule types, not a language. Neither ships the two primitives the agent case needs: a per-tool rate limiter and a human-approval decision effect. |
-| API gateways / WAFs / rate-limit middleware | Allow-lists and quotas at the HTTP layer | Toolwall enforces at the *semantic tool* layer, above transport, on typed arguments (`to`, `path`, `amount`) rather than on request bytes. A gateway cannot express "this file write is fine under `/workspace` and not under `/etc`" without re-parsing the agent's intent. |
-| `agent-injection-bench` (sibling) | Measures how often indirect prompt injection succeeds, and how much each mitigation helps | Direct complement. That project's `egress_filter` defense arm is, conceptually, a one-policy toolwall hard-coded into a benchmark harness. This project extracts that idea into something installable, generalises it (arg rules, rate limits, escalation, audit), and demonstrates it against the same scenario *shapes* (§7) — without importing a line of that repo's code. The two together read as: measure the problem, then ship part of the fix. |
+| API gateways / WAFs / rate-limit middleware | Allow-lists and quotas at the HTTP layer | Cheoyong enforces at the *semantic tool* layer, above transport, on typed arguments (`to`, `path`, `amount`) rather than on request bytes. A gateway cannot express "this file write is fine under `/workspace` and not under `/etc`" without re-parsing the agent's intent. |
+| `agent-injection-bench` (sibling) | Measures how often indirect prompt injection succeeds, and how much each mitigation helps | Direct complement. That project's `egress_filter` defense arm is, conceptually, a one-policy cheoyong hard-coded into a benchmark harness. This project extracts that idea into something installable, generalises it (arg rules, rate limits, escalation, audit), and demonstrates it against the same scenario *shapes* (§7) — without importing a line of that repo's code. The two together read as: measure the problem, then ship part of the fix. |
 
 **The novel angle is four specific properties, none of which the above combine:**
 
@@ -61,23 +61,23 @@ decision including the allowed ones.
 
 ### The integration point
 
-Toolwall does not wrap the model, the agent framework, or the tool registry. It
+Cheoyong does not wrap the model, the agent framework, or the tool registry. It
 wraps exactly one moment. The caller's loop already looks like:
 
 ```
 model returns tool_calls  ->  app dispatches to a Python function  ->  result back to model
                           ^
-                          toolwall goes here
+                          cheoyong goes here
 ```
 
-Two calling conventions, both in `toolwall/engine.py`:
+Two calling conventions, both in `cheoyong/engine.py`:
 
-- **`Toolwall.check(tool: str, args: dict, context: dict | None = None) -> Decision`**
+- **`Cheoyong.check(tool: str, args: dict, context: dict | None = None) -> Decision`**
   The primitive. Pure, synchronous, no I/O except the audit write and (if the
   decision escalates) the escalation callback. The caller inspects
   `decision.effect` and decides what to do. This is what an integration into a
   framework we have never heard of uses.
-- **`Toolwall.call(tool: str, args: dict, fn: Callable[..., Any], context=None) -> Any`**
+- **`Cheoyong.call(tool: str, args: dict, fn: Callable[..., Any], context=None) -> Any`**
   Convenience: runs `check`, and on `ALLOW` calls `fn(**decision.args)`, on
   anything else raises `ToolCallBlocked(decision)`. Saves the caller five lines
   and, more importantly, guarantees the executed args are the ones the engine
@@ -106,29 +106,29 @@ can redact (§5).
 
 See §10 for the full list. The three that matter most for framing:
 
-- **Model/content filtering.** Toolwall never sees prompts, completions, or tool
+- **Model/content filtering.** Cheoyong never sees prompts, completions, or tool
   *results*. Only `(tool, args, context)`.
-- **Sandboxing.** Toolwall is a chokepoint, not a capability boundary — see the
+- **Sandboxing.** Cheoyong is a chokepoint, not a capability boundary — see the
   threat-model limitation below.
 - **A policy language.** The YAML is a config file for four rule types. Anything
   it cannot express is a five-line Python function.
 
-### Threat model, and what toolwall does not defend against
+### Threat model, and what cheoyong does not defend against
 
 State this plainly in the README too; a reviewer will look for it.
 
-Toolwall assumes the *application* is trusted and the *model's decisions* are
+Cheoyong assumes the *application* is trusted and the *model's decisions* are
 not. It governs only calls routed through `check()`/`call()`. It therefore does
 **not** protect against:
 
 - **Tool access that bypasses the chokepoint.** If the agent process can invoke
   the tool by another path (a second client, a shell, an unwrapped SDK call),
-  toolwall never sees it. It is not a sandbox and does not claim to be.
+  cheoyong never sees it. It is not a sandbox and does not claim to be.
 - **Harm expressible entirely within allowed calls and allowed arguments.** If
   `send_email` to `example.com` is permitted, an injected instruction that emails
   a colleague something misleading is not blocked. This is the residual
   confused-deputy risk and it is real.
-- **Injection itself.** Toolwall does not detect malicious instructions; it
+- **Injection itself.** Cheoyong does not detect malicious instructions; it
   constrains the consequences of following them. Pairing it with a detector is
   the sibling project's territory.
 - **A compromised policy file.** Policies are trusted input. Loading a policy
@@ -141,15 +141,15 @@ not. It governs only calls routed through `check()`/`call()`. It therefore does
 ### Repo layout
 
 ```
-agent-toolwall/
+cheoyong/
 ├── README.md              # the sales pitch — under a minute to read (M8)
 ├── PLAN.md                # this file
 ├── LICENSE                # MIT
 ├── pyproject.toml         # hatchling; runtime dep: pyyaml. extras: llm, dev
-├── toolwall/
+├── cheoyong/
 │   ├── __init__.py        # __version__ + public API re-exports
 │   ├── types.py           # ToolCall, Effect, Decision, exceptions
-│   ├── engine.py          # Toolwall: check(), call(), ordering, fail-closed,
+│   ├── engine.py          # Cheoyong: check(), call(), ordering, fail-closed,
 │   │                      #   escalation hooks (auto_deny, cli_confirm)
 │   ├── policies.py        # built-in policy factories
 │   ├── loader.py          # YAML/JSON -> policies, strict validation, --validate CLI
@@ -194,8 +194,8 @@ args: dict           # the args approved for execution (== input args unless red
 are closures produced by factories in `policies.py`; a user policy is just a
 function. No base class to subclass, no registration.
 
-**`Toolwall`** (the engine) — constructed as
-`Toolwall(policies: list[Policy], default: Effect, audit: AuditLog | None = None,
+**`Cheoyong`** (the engine) — constructed as
+`Cheoyong(policies: list[Policy], default: Effect, audit: AuditLog | None = None,
 escalate: Callable | None = None)`.
 
 Evaluation contract (this is the security-critical part; spell it out in
@@ -227,7 +227,7 @@ is a downgrade, not an upgrade. Record shape:
 ```json
 {
   "ts": "2026-08-19T12:00:00.123Z",
-  "toolwall_version": "0.1.0",
+  "cheoyong_version": "0.1.0",
   "tool": "send_email",
   "args": {"to": "attacker@evil.example", "body": "..."},
   "context": {"session_id": "s1"},
@@ -296,11 +296,11 @@ stays green.
 > **Preamble for every task below.** Each task is written to be pasted into a
 > single `codex "..."` invocation. Prepend this to each:
 >
-> *"Repo: `/Users/uiseo/Documents/research/agent-toolwall` — a small, framework-
+> *"Repo: `/Users/uiseo/Documents/research/cheoyong` — a small, framework-
 > agnostic Python library that sits between an LLM agent's decision to call a
 > tool and the tool executing, and returns an allow/deny/escalate Decision based
 > on policies over `(tool_name, args, context)`. Python 3.11+, `pytest`, package
-> import name `toolwall`. Read `PLAN.md` §2, §3 and §5 for the integration
+> import name `cheoyong`. Read `PLAN.md` §2, §3 and §5 for the integration
 > point, core abstractions, evaluation contract, and policy semantics before
 > writing code; follow them exactly. The only runtime dependency permitted is
 > `pyyaml` — do not add others. Do not add abstractions the plan does not call
@@ -316,15 +316,15 @@ stays green.
 with a tool-name allow-list and get back a `Decision`. No arg rules, no rate
 limits, no escalation, no audit file, no YAML.
 
-**Files.** `pyproject.toml`, `LICENSE` (MIT), `toolwall/__init__.py`,
-`toolwall/types.py`, `toolwall/engine.py`, `toolwall/policies.py`
+**Files.** `pyproject.toml`, `LICENSE` (MIT), `cheoyong/__init__.py`,
+`cheoyong/types.py`, `cheoyong/engine.py`, `cheoyong/policies.py`
 (`tool_allowlist`, `tool_denylist` only), `tests/test_engine.py`,
 `README.md` (quickstart only; the full README is M8).
 
 **Details.**
 - `types.py`: `Effect`, `ToolCall`, `Decision`, `ToolCallBlocked(Exception)`
   carrying `.decision`, `PolicyError(Exception)` (used by the loader in M6).
-- `engine.py`: `Toolwall` per the §3 evaluation contract, minus escalation
+- `engine.py`: `Cheoyong` per the §3 evaluation contract, minus escalation
   (step 7 is a no-op stub that raises `NotImplementedError` if reached — no
   escalating policies exist yet) and minus audit (step 8 no-op). Implement
   steps 1-6 fully, including deep-copy of args and the policy-exception →
@@ -333,24 +333,24 @@ limits, no escalation, no audit file, no YAML.
   `ALLOW` on match, `None` otherwise (so `default` decides the rest);
   `tool_denylist(names)` returns `DENY` on match, `None` otherwise. The literal
   string `"*"` in either list matches every tool.
-- `Toolwall(default=...)` accepts `Effect.DENY` or `Effect.ALLOW` and has **no
+- `Cheoyong(default=...)` accepts `Effect.DENY` or `Effect.ALLOW` and has **no
   default value** — the caller must state the posture explicitly.
-- `__init__.py` exports `Toolwall, Decision, Effect, ToolCall, ToolCallBlocked`
+- `__init__.py` exports `Cheoyong, Decision, Effect, ToolCall, ToolCallBlocked`
   and `__version__ = "0.1.0"`.
-- `pyproject.toml`: hatchling backend, name `agent-toolwall`, import package
-  `toolwall`, `requires-python = ">=3.11"`, `dependencies = ["pyyaml>=6"]`,
+- `pyproject.toml`: hatchling backend, name `cheoyong`, import package
+  `cheoyong`, `requires-python = ">=3.11"`, `dependencies = ["pyyaml>=6"]`,
   `[project.optional-dependencies] dev = ["pytest"]`, MIT, repo URL
-  `https://github.com/euisuh/agent-toolwall`.
+  `https://github.com/euisuh/cheoyong`.
 
 **Acceptance criteria.**
 1. `pip install -e ".[dev]"` succeeds in a clean venv, then
-   `python -c "import toolwall; print(toolwall.__version__)"` prints `0.1.0`.
+   `python -c "import cheoyong; print(cheoyong.__version__)"` prints `0.1.0`.
 2. `pytest` passes, offline, in under 10 seconds.
-3. A test builds `Toolwall([tool_allowlist(["read_file"])], default=Effect.DENY)`
+3. A test builds `Cheoyong([tool_allowlist(["read_file"])], default=Effect.DENY)`
    and asserts: `check("read_file", {"path": "a"})` → `ALLOW`;
    `check("send_email", {})` → `DENY` with `reason == "default"`.
 4. A test asserts the mirror case with `tool_denylist` and `default=Effect.ALLOW`.
-5. A test asserts `Toolwall([], default=Effect.DENY)` denies every call (an
+5. A test asserts `Cheoyong([], default=Effect.DENY)` denies every call (an
    engine with no policies is a closed firewall, not an open one).
 6. A test asserts a policy that raises `ValueError` yields `DENY` with `reason`
    starting `policy_error:`, and that the exception does not propagate.
@@ -369,7 +369,7 @@ limits, no escalation, no audit file, no YAML.
 them non-trivial to evade. This is the milestone a security reviewer reads
 hardest.
 
-**Files.** `toolwall/policies.py` (`arg_rules`), `toolwall/types.py`
+**Files.** `cheoyong/policies.py` (`arg_rules`), `cheoyong/types.py`
 (normalisation helpers on `ToolCall` construction), `tests/test_policies.py`,
 `tests/test_normalize.py`.
 
@@ -443,7 +443,7 @@ hardest.
 
 **Goal.** Per-tool sliding-window rate limits, keyed optionally on context.
 
-**Files.** `toolwall/policies.py` (`rate_limit`), `tests/test_ratelimit.py`.
+**Files.** `cheoyong/policies.py` (`rate_limit`), `tests/test_ratelimit.py`.
 
 **Details.**
 - `rate_limit(tool: str, max_calls: int, per_seconds: float, key: Sequence[str] = ()) -> Policy`.
@@ -455,7 +455,7 @@ hardest.
 - **Only calls that end up ALLOWED consume budget.** The policy therefore cannot
   record its timestamp at evaluation time — the engine notifies the policy after
   the final decision. Implement this as: the rate-limit closure exposes a
-  `commit(toolcall)` attribute, and `Toolwall` calls `commit()` on every policy
+  `commit(toolcall)` attribute, and `Cheoyong` calls `commit()` on every policy
   that has one, once, after the decision resolves to `ALLOW`. Policies without
   a `commit` attribute are unaffected. (This is the one place the plan permits a
   second protocol beyond `(ToolCall) -> Decision | None`; it exists because the
@@ -485,7 +485,7 @@ hardest.
 
 **Goal.** Exactly one durable JSON record per decision, allows included.
 
-**Files.** `toolwall/audit.py`, `toolwall/engine.py` (wire step 8),
+**Files.** `cheoyong/audit.py`, `cheoyong/engine.py` (wire step 8),
 `tests/test_audit.py`.
 
 **Details.**
@@ -504,8 +504,8 @@ hardest.
 1. One `check()` → exactly one record. Ten checks → ten lines in the file.
 2. Allowed calls are recorded (assert an `effect == "allow"` line exists) — this
    is the criterion that distinguishes an audit log from a block log.
-3. Every §3 record key is present with the right type; `toolwall_version`
-   matches `toolwall.__version__`.
+3. Every §3 record key is present with the right type; `cheoyong_version`
+   matches `cheoyong.__version__`.
 4. Redaction: `AuditLog(redact=["api_key"])` with args
    `{"api_key": "sk-real", "nested": {"API_KEY": "sk-real"}}` produces a record
    whose serialised JSON does not contain `sk-real` anywhere.
@@ -523,13 +523,13 @@ hardest.
 **Goal.** The `ESCALATE` effect, the callback contract, and the two shipped
 implementations.
 
-**Files.** `toolwall/policies.py` (`sensitive`), `toolwall/engine.py`
+**Files.** `cheoyong/policies.py` (`sensitive`), `cheoyong/engine.py`
 (escalation resolution + `auto_deny`, `cli_confirm`), `tests/test_escalate.py`.
 
 **Details.** Full specification in §6. Key points for implementation:
 - `sensitive(tools: Iterable[str]) -> Policy` returns
   `Decision(ESCALATE, ...)`; it does not short-circuit.
-- `Toolwall(escalate=...)` defaults to `auto_deny` so a headless caller who
+- `Cheoyong(escalate=...)` defaults to `auto_deny` so a headless caller who
   never configures anything gets a safe, non-blocking answer.
 - Callback contract: `(ToolCall, Decision) -> bool`. Anything other than a
   literal `True` — `False`, `None`, a truthy non-bool, an exception — resolves
@@ -559,8 +559,8 @@ implementations.
 **Goal.** Load the whole configuration from one YAML (or JSON) file, with
 validation strict enough that a typo cannot silently open the firewall.
 
-**Files.** `toolwall/loader.py`, `toolwall/__init__.py` (export
-`load_policy_file`, `Toolwall.from_file`), `tests/test_loader.py`.
+**Files.** `cheoyong/loader.py`, `cheoyong/__init__.py` (export
+`load_policy_file`, `Cheoyong.from_file`), `tests/test_loader.py`.
 
 **Details.**
 - Format (full semantics in §5):
@@ -595,7 +595,7 @@ tools:
 ```
 
 - `load_policy_file(path) -> tuple[list[Policy], Effect, AuditLog | None]`, and
-  `Toolwall.from_file(path, escalate=None)` as the one-liner most users call.
+  `Cheoyong.from_file(path, escalate=None)` as the one-liner most users call.
 - **Emitted policy order is fixed and documented**: global (`"*"`) arg rules →
   tool allow/deny → tool-specific arg rules → rate limits → sensitive. Deny-
   before-escalate falls out of this ordering.
@@ -608,12 +608,12 @@ tools:
   that fail `re.compile`; `rate_limit.max` not a positive int; `allow_hosts`
   not a list of non-empty strings; `enum` not a list; `type` not in the
   supported set. There is no lenient mode and no warn-and-continue path.
-- `python -m toolwall.loader --validate <path>` prints the resolved policy list
+- `python -m cheoyong.loader --validate <path>` prints the resolved policy list
   in order (one line per emitted policy) and exits 0, or prints the error and
   exits 1.
 
 **Acceptance criteria.**
-1. `python -m toolwall.loader --validate toolwall/demo_policy.yaml` exits 0 and
+1. `python -m cheoyong.loader --validate cheoyong/demo_policy.yaml` exits 0 and
    prints the ordered policy list.
 2. A round-trip test: a file-loaded engine and a hand-constructed engine with
    the equivalent policies produce identical decisions across a table of ~10
@@ -622,7 +622,7 @@ tools:
    `PolicyError` and that the message names the offending key path.
 4. **Fail-closed on malformed input**: a file that is not valid YAML, a file
    that is valid YAML but not a mapping, and an empty file each raise
-   `PolicyError`. A test asserts no `Toolwall` is constructed and no partial
+   `PolicyError`. A test asserts no `Cheoyong` is constructed and no partial
    policy list is returned — the failure mode is "refuses to start", never
    "starts with fewer rules".
 5. A policy file omitting `default` is rejected (a test asserts this explicitly;
@@ -639,8 +639,8 @@ tools:
 **Goal.** The artifact that proves this works. One command, six scenarios, two
 arms, a printed table, and a nonzero exit if reality disagrees with the plan.
 
-**Files.** `toolwall/demo.py`, `toolwall/demo_policy.yaml`, `pyproject.toml`
-(`[project.scripts] toolwall-demo = "toolwall.demo:main"`), `tests/test_demo.py`,
+**Files.** `cheoyong/demo.py`, `cheoyong/demo_policy.yaml`, `pyproject.toml`
+(`[project.scripts] cheoyong-demo = "cheoyong.demo:main"`), `tests/test_demo.py`,
 `README.md` (paste the output).
 
 **Details.** Full scenario specification in §7. Structure:
@@ -650,10 +650,10 @@ arms, a printed table, and a nonzero exit if reality disagrees with the plan.
 - **Fake agent**: a scripted "model" that, for each scenario, emits the sequence
   of tool calls an agent following an injected instruction would emit. Default
   `--model mock`; deterministic; zero dependencies. It is deliberately naive —
-  the demo's claim is about what toolwall blocks, not about how the model was
+  the demo's claim is about what cheoyong blocks, not about how the model was
   fooled (that claim belongs to `agent-injection-bench`).
 - **Two arms per scenario**: `unprotected` calls the tools directly;
-  `protected` routes every call through `Toolwall.from_file("demo_policy.yaml",
+  `protected` routes every call through `Cheoyong.from_file("demo_policy.yaml",
   escalate=auto_deny)` and catches `ToolCallBlocked`.
 - **Expected outcomes are declared in the scenario table** (attacker-goal
   achieved: yes/no per arm), and `main()` asserts them, exiting 1 on any
@@ -666,7 +666,7 @@ arms, a printed table, and a nonzero exit if reality disagrees with the plan.
   to run one.
 
 **Acceptance criteria.**
-1. `pip install -e .` then `toolwall-demo` exits 0 and prints the table.
+1. `pip install -e .` then `cheoyong-demo` exits 0 and prints the table.
 2. In the `unprotected` arm, the attacker goal is achieved for all five attack
    scenarios — asserted against `World` state (e.g.
    `world.sent_emails[0]["to"] == "attacker@evil.example"`). A demo where the
@@ -676,7 +676,7 @@ arms, a printed table, and a nonzero exit if reality disagrees with the plan.
 4. The benign control scenario is **ALLOWED** in the protected arm and its
    legitimate side effect occurs — a firewall that denies everything is not a
    result.
-5. `toolwall-demo` writes an audit log containing one record per attempted call
+5. `cheoyong-demo` writes an audit log containing one record per attempted call
    in the protected arm, allows and denies both.
 6. `tests/test_demo.py` runs `main()` in-process with a temp audit path and
    asserts the same outcomes, so the demo is covered by `pytest` and cannot rot.
@@ -706,16 +706,16 @@ arms, a printed table, and a nonzero exit if reality disagrees with the plan.
 7. One paragraph on the relationship to `agent-injection-bench`.
 
 **Acceptance criteria.**
-1. `pip install -e ".[dev]"` in a clean venv, then `toolwall-demo`, then
+1. `pip install -e ".[dev]"` in a clean venv, then `cheoyong-demo`, then
    `pytest` — all three succeed from a fresh clone with no other setup.
 2. `python -m build` (or `hatch build`) produces an sdist and a wheel; the wheel
    contains `demo_policy.yaml` as package data (assert by installing the wheel
-   into a temp venv and running `toolwall-demo`).
+   into a temp venv and running `cheoyong-demo`).
 3. README renders correctly on GitHub; every command in it has been run.
 4. Repo working tree under 5 MB (`du -sh` check documented in the plan of
    record), MIT licensed, tagged `v0.1.0`, pushed to
-   `github.com/euisuh/agent-toolwall`.
-5. `toolwall.__version__`, the `pyproject.toml` version, and the git tag agree
+   `github.com/euisuh/cheoyong`.
+5. `cheoyong.__version__`, the `pyproject.toml` version, and the git tag agree
    (a test asserts the first two).
 
 ---
@@ -725,7 +725,7 @@ arms, a printed table, and a nonzero exit if reality disagrees with the plan.
 **Goal.** Show the same blocks against a real model rather than a scripted one,
 so the demo is not vulnerable to "your fake agent was rigged".
 
-**Files.** `toolwall/demo.py` (add `--model` branches),
+**Files.** `cheoyong/demo.py` (add `--model` branches),
 `pyproject.toml` (`[project.optional-dependencies] llm = ["anthropic", "openai"]`),
 `.env.example`.
 
@@ -739,9 +739,9 @@ leaderboard. If the model refuses the injection, the demo reports that honestly
 rather than retrying until it complies.
 
 **Acceptance criteria.**
-1. `toolwall-demo --model mock` still works with the `llm` extra uninstalled
+1. `cheoyong-demo --model mock` still works with the `llm` extra uninstalled
    (assert the provider SDKs are never imported at module load).
-2. `toolwall-demo --model sonnet` (with `ANTHROPIC_API_KEY` set) runs the same
+2. `cheoyong-demo --model sonnet` (with `ANTHROPIC_API_KEY` set) runs the same
    six scenarios and prints the same table plus a per-scenario note on whether
    the model actually attempted the attacker's action.
 3. Any tool call the live model makes in the protected arm is routed through
@@ -844,7 +844,7 @@ A library with no UI cannot ask a human anything. So it defines the *contract*
 and ships two trivial implementations, and that is the whole feature.
 
 **The contract.** `escalate: Callable[[ToolCall, Decision], bool]`, supplied to
-`Toolwall(...)`. Invoked at most once per `check()`, only when the decision has
+`Cheoyong(...)`. Invoked at most once per `check()`, only when the decision has
 resolved to a pending escalation and nothing has denied. Returns `True` to
 approve; anything else denies.
 
@@ -883,7 +883,7 @@ example rather than shipping one.
 
 ## 7. The demo
 
-The single most important artifact. `toolwall-demo`, offline, under five
+The single most important artifact. `cheoyong-demo`, offline, under five
 seconds, six scenarios, two arms, one table.
 
 **Scenario shapes** mirror the taxonomy in `agent-injection-bench`
@@ -933,8 +933,8 @@ differs from its declared expectation, so the table cannot go stale silently and
 **What the demo does not claim.** It does not claim a model would be fooled at
 any particular rate - that measurement is `agent-injection-bench`'s job, and the
 README links there rather than inventing a number. The demo's claim is narrower
-and fully supported: *given* a tool call an injected agent would make, toolwall
-denies it, and *given* the legitimate task, toolwall permits it.
+and fully supported: *given* a tool call an injected agent would make, cheoyong
+denies it, and *given* the legitimate task, cheoyong permits it.
 
 ---
 
@@ -1002,20 +1002,20 @@ v1 ships when **all** of the following are true:
 
 1. From a fresh clone in a clean venv: `pip install -e ".[dev]"` succeeds, then
    `pytest` passes offline with no API keys set, in under 10 seconds.
-2. `toolwall-demo` exits 0, prints the §7 table, blocks 5/5 attacks, allows 1/1
+2. `cheoyong-demo` exits 0, prints the §7 table, blocks 5/5 attacks, allows 1/1
    benign task, and writes an audit log with allows and denies both.
 3. All four v1 policy types (§5) exist, are constructible in Python, and are
    expressible in the YAML/JSON policy file.
-4. `python -m toolwall.loader --validate <file>` exits 0 on the demo policy and
+4. `python -m cheoyong.loader --validate <file>` exits 0 on the demo policy and
    exits 1 with a key-path error message on each malformed variant.
 5. Every edge case in §8 has a named, passing test.
 6. `python -m build` produces an sdist and a wheel; installing the wheel into a
-   temp venv and running `toolwall-demo` works (package data included).
+   temp venv and running `cheoyong-demo` works (package data included).
 7. README is under ~150 lines, leads with the demo table, contains a working
    15-line usage snippet, a policy YAML example, three integration snippets, and
    an honest "what this is not / threat model limitations" section.
-8. `toolwall.__version__ == "0.1.0"`, matching `pyproject.toml`; repo tagged
-   `v0.1.0` and pushed to `github.com/euisuh/agent-toolwall`; MIT licensed;
+8. `cheoyong.__version__ == "0.1.0"`, matching `pyproject.toml`; repo tagged
+   `v0.1.0` and pushed to `github.com/euisuh/cheoyong`; MIT licensed;
    working tree under 5 MB.
 
 Anything not on this list is v2. If the schedule slips, the *only* sanctioned
@@ -1030,10 +1030,10 @@ credible rather than a toy.
 ## 10. Explicit non-goals for v1
 
 - **Content filtering of any kind.** No prompt scanning, no output moderation,
-  no injection detection, no PII classifier. Toolwall sees `(tool, args,
+  no injection detection, no PII classifier. Cheoyong sees `(tool, args,
   context)` and nothing else. Guardrails/NeMo/Rebuff occupy that space; pairing
   with them is a README paragraph, not a feature.
-- **Sandboxing or capability enforcement.** Toolwall is a chokepoint the
+- **Sandboxing or capability enforcement.** Cheoyong is a chokepoint the
   application opts into. It cannot stop a tool invoked by a path that does not
   go through `check()`, and the README says so in those words.
 - **A policy language.** No Rego, no CEL, no expression evaluator, no

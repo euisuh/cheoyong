@@ -1,11 +1,11 @@
 import pytest
 
-from toolwall import Effect, Toolwall
-from toolwall.policies import arg_rules
+from cheoyong import Effect, Cheoyong
+from cheoyong.policies import arg_rules
 
 
 def check(rules, args, tool="send_email"):
-    return Toolwall([arg_rules(rules)], default=Effect.ALLOW).check(tool, args)
+    return Cheoyong([arg_rules(rules)], default=Effect.ALLOW).check(tool, args)
 
 
 @pytest.mark.parametrize(
