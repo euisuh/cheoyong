@@ -5,7 +5,7 @@ Execution model: each milestone below is a self-contained task intended to be
 handed to a one-shot `codex "..."` invocation by an executor with no memory of
 prior context. Review is done separately against the acceptance criteria.
 
-Sibling projects: `agent-injection-bench` (offense/measurement) and
+Sibling projects: `gumiho` (offense/measurement) and
 `modelscan-eval` (supply-chain scanning). This repo is the defensive one: the
 deliverable is a library someone installs, not a number someone cites.
 
@@ -36,7 +36,7 @@ decision including the allowed ones.
 | Guardrails AI, NeMo Guardrails, Rebuff | Validate/filter LLM *text* — input prompts, output content, conversational rails | Reused: the interception-point idea (a library that sits in the loop and can refuse). Different: cheoyong never sees model text. Its entire input is `(tool_name, args, context)` after the model has decided, before the effect. Content filtering is explicitly out of scope (§10). |
 | OPA / Open Policy Agent, casbin | General-purpose policy engines; Rego or model/matcher files; often an out-of-process sidecar | Reused: allow/deny policy shape, default-deny posture, decision logging as a first-class output. Different: no policy DSL and no sidecar. Policies are Python callables; the YAML file is a thin surface over four built-in rule types, not a language. Neither ships the two primitives the agent case needs: a per-tool rate limiter and a human-approval decision effect. |
 | API gateways / WAFs / rate-limit middleware | Allow-lists and quotas at the HTTP layer | Cheoyong enforces at the *semantic tool* layer, above transport, on typed arguments (`to`, `path`, `amount`) rather than on request bytes. A gateway cannot express "this file write is fine under `/workspace` and not under `/etc`" without re-parsing the agent's intent. |
-| `agent-injection-bench` (sibling) | Measures how often indirect prompt injection succeeds, and how much each mitigation helps | Direct complement. That project's `egress_filter` defense arm is, conceptually, a one-policy cheoyong hard-coded into a benchmark harness. This project extracts that idea into something installable, generalises it (arg rules, rate limits, escalation, audit), and demonstrates it against the same scenario *shapes* (§7) — without importing a line of that repo's code. The two together read as: measure the problem, then ship part of the fix. |
+| `gumiho` (sibling) | Measures how often indirect prompt injection succeeds, and how much each mitigation helps | Direct complement. That project's `egress_filter` defense arm is, conceptually, a one-policy cheoyong hard-coded into a benchmark harness. This project extracts that idea into something installable, generalises it (arg rules, rate limits, escalation, audit), and demonstrates it against the same scenario *shapes* (§7) — without importing a line of that repo's code. The two together read as: measure the problem, then ship part of the fix. |
 
 **The novel angle is four specific properties, none of which the above combine:**
 
@@ -651,7 +651,7 @@ arms, a printed table, and a nonzero exit if reality disagrees with the plan.
   of tool calls an agent following an injected instruction would emit. Default
   `--model mock`; deterministic; zero dependencies. It is deliberately naive —
   the demo's claim is about what cheoyong blocks, not about how the model was
-  fooled (that claim belongs to `agent-injection-bench`).
+  fooled (that claim belongs to `gumiho`).
 - **Two arms per scenario**: `unprotected` calls the tools directly;
   `protected` routes every call through `Cheoyong.from_file("demo_policy.yaml",
   escalate=auto_deny)` and catches `ToolCallBlocked`.
@@ -703,7 +703,7 @@ arms, a printed table, and a nonzero exit if reality disagrees with the plan.
    lines each, in the README, not in the package.
 6. "What this is not": not a content filter, not a sandbox, not an injection
    detector; the §2 threat-model limitations, honestly stated.
-7. One paragraph on the relationship to `agent-injection-bench`.
+7. One paragraph on the relationship to `gumiho`.
 
 **Acceptance criteria.**
 1. `pip install -e ".[dev]"` in a clean venv, then `cheoyong-demo`, then
@@ -886,7 +886,7 @@ example rather than shipping one.
 The single most important artifact. `cheoyong-demo`, offline, under five
 seconds, six scenarios, two arms, one table.
 
-**Scenario shapes** mirror the taxonomy in `agent-injection-bench`
+**Scenario shapes** mirror the taxonomy in `gumiho`
 (data exfiltration, unauthorized action, destructive action, resource abuse) so
 the two projects visibly compose — but the code is independent: no import, no
 shared fixtures, no submodule. Same threat shapes, different repo.
@@ -931,7 +931,7 @@ differs from its declared expectation, so the table cannot go stale silently and
 `tests/test_demo.py` gets the whole integration test for free.
 
 **What the demo does not claim.** It does not claim a model would be fooled at
-any particular rate - that measurement is `agent-injection-bench`'s job, and the
+any particular rate - that measurement is `gumiho`'s job, and the
 README links there rather than inventing a number. The demo's claim is narrower
 and fully supported: *given* a tool call an injected agent would make, cheoyong
 denies it, and *given* the legitimate task, cheoyong permits it.
@@ -1049,7 +1049,7 @@ credible rather than a toy.
   log shipping.
 - **RBAC / multi-tenancy / subject modelling.** `context` is a free dict.
 - **A benchmark, a leaderboard, or ASR numbers.** That is
-  `agent-injection-bench`. This repo's demo demonstrates blocking; it does not
+  `gumiho`. This repo's demo demonstrates blocking; it does not
   measure susceptibility, and it must not grow a results table.
 - **A PyPI release.** `pip install -e .`, a built wheel, and a git tag are the
   bar for v1. Publishing is a five-minute task whenever it becomes useful and is
