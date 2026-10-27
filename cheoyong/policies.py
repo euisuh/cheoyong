@@ -126,7 +126,10 @@ def _strings(value: Any):
         for item in value:
             yield from _strings(item)
     elif isinstance(value, dict):
-        for item in value.values():
+        for key, item in value.items():
+            # Keys are normalized here, not in normalize_args, so that two keys
+            # that collide after NFKC cannot hide one value from the scan.
+            yield unicodedata.normalize("NFKC", key)
             yield from _strings(item)
 
 
@@ -136,8 +139,15 @@ def _redact(value: Any, pattern: re.Pattern[str]) -> Any:
     if isinstance(value, list):
         return [_redact(item, pattern) for item in value]
     if isinstance(value, dict):
-        return {key: _redact(item, pattern) for key, item in value.items()}
+        return {
+            _redact(key, pattern): _redact(item, pattern) for key, item in value.items()
+        }
     return value
+
+
+# LDH labels only. Anything else (backslash, ';', '@', IPv6 brackets) is a
+# parser-differential risk between urlsplit and the tool's HTTP/SMTP client.
+_HOSTNAME = re.compile(r"[a-z0-9-]+(\.[a-z0-9-]+)*")
 
 
 def _host(value: str) -> str | None:
@@ -150,7 +160,8 @@ def _host(value: str) -> str | None:
             host = value
         if not host or any(char.isspace() for char in host):
             return None
-        return host.casefold().encode("idna").decode("ascii")
+        host = host.casefold().encode("idna").decode("ascii")
+        return host if _HOSTNAME.fullmatch(host) else None
     except (UnicodeError, ValueError):
         return None
 
@@ -196,6 +207,7 @@ def arg_rules(rules: dict) -> Policy:
         value: Any,
         constraint: dict[str, Any],
     ) -> Decision | None:
+        raw_value = call.args.get(raw_arg)
         if constraint.get("required") and value is None:
             return violation(call, arg, "required", value)
         if value is None:
@@ -206,9 +218,15 @@ def arg_rules(rules: dict) -> Policy:
             valid = type(value) is expected
             if not valid:
                 return violation(call, arg, "type", value)
+        if any(key in constraint for key in ("matches", "enum", "allow_hosts")) and (
+            value != raw_value
+        ):
+            # The rule saw the NFKC form but the tool would get the raw form
+            # (e.g. fullwidth "／workspace/" is a relative path). Refuse.
+            return violation(call, arg, "normalization", raw_value)
         if "max_len" in constraint:
             try:
-                too_long = len(value) > constraint["max_len"]
+                too_long = max(len(value), len(raw_value)) > constraint["max_len"]
             except TypeError:
                 too_long = True
             if too_long:
@@ -266,6 +284,11 @@ def arg_rules(rules: dict) -> Policy:
             ]
             for arg in ordered_args:
                 constraint = tool_rules[arg]
+                if arg == "*" and "denies" in constraint:
+                    for target in values_by_norm:
+                        key = unicodedata.normalize("NFKC", raw_by_norm.get(target, target))
+                        if constraint["denies"].search(key):
+                            return violation(call, target, "denies", raw_by_norm.get(target, target))
                 if arg == "*":
                     targets = tuple(values_by_norm.items())
                 else:
@@ -282,6 +305,14 @@ def arg_rules(rules: dict) -> Policy:
                             match_arg_key(key): value
                             for key, value in call.norm_args.items()
                         }
+            if tool != "*" and tool in prepared and "*" not in tool_rules:
+                # Fail closed on argument smuggling: a tool with argument rules
+                # accepts only the arguments it names. Add "*": {} to opt out.
+                for target in values_by_norm:
+                    if target not in tool_rules:
+                        return violation(
+                            call, target, "unexpected argument", raw_by_norm.get(target, target)
+                        )
         return redaction
 
     return policy

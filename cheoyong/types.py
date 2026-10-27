@@ -39,11 +39,19 @@ def _normalize_value(value: Any, depth: int, scanned: list[int]) -> Any:
     if isinstance(value, list):
         return [_normalize_value(item, depth + 1, scanned) for item in value]
     if isinstance(value, dict):
+        for key in value:
+            if not isinstance(key, str):
+                raise NormalizationError(f"nested argument key must be str: {key!r}")
         return {
             key: _normalize_value(item, depth + 1, scanned)
             for key, item in value.items()
         }
-    return value
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    # Fail closed: tuples, sets, bytes, and objects would not be scanned by rules.
+    raise NormalizationError(
+        f"argument value must be JSON-shaped, got {type(value).__name__}"
+    )
 
 
 def normalize_args(args: dict[str, Any]) -> dict[str, Any]:
