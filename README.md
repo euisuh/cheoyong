@@ -88,6 +88,7 @@ tools:
     allow: true
     args:
       to: {type: str, required: true, allow_hosts: [example.com]}
+      body: {type: str}
   submit_order:
     allow: true
     sensitive: true
@@ -95,6 +96,7 @@ tools:
     allow: true
     args:
       path: {type: str, required: true, matches: "^/workspace/"}
+      content: {type: str}
   "*":
     args:
       "*": {denies: "CANARY-[0-9A-F]{4}"}
