@@ -16,12 +16,12 @@ tools:
   Write:
     allow: true
     args:
-      file_path: {type: str, required: true, matches: '^/home/you/src/'}
+      file_path: {type: str, required: true, within: [/home/you/src]}
       "*": {}
   Edit:
     allow: true
     args:
-      file_path: {type: str, required: true, matches: '^/home/you/src/'}
+      file_path: {type: str, required: true, within: [/home/you/src]}
       "*": {}
   WebFetch:
     allow: true

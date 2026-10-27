@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from pathlib import Path
 import sys
 
 from .engine import Cheoyong
@@ -18,6 +20,14 @@ from .types import Effect
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="cheoyong-hook")
     parser.add_argument("--policy", required=True, help="YAML or JSON policy file")
+    parser.add_argument(
+        "--state-dir",
+        default=os.environ.get("CHEOYONG_STATE_DIR")
+        or Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+        / "cheoyong",
+        help="where rate-limit windows persist between hook calls "
+        "(default: $CHEOYONG_STATE_DIR or $XDG_STATE_HOME/cheoyong)",
+    )
     args = parser.parse_args(argv)
     escalated = []
     try:
@@ -25,7 +35,9 @@ def main(argv: list[str] | None = None) -> int:
         # Escalation is approved here only to hand the question to Claude
         # Code's own permission prompt via permissionDecision "ask" below.
         wall = Cheoyong.from_file(
-            args.policy, escalate=lambda call, decision: escalated.append(decision) or True
+            args.policy,
+            escalate=lambda call, decision: escalated.append(decision) or True,
+            state_dir=args.state_dir,
         )
         tool_input = event["tool_input"]
         decision = wall.check(
