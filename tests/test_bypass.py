@@ -29,11 +29,21 @@ def test_nfkc_colliding_nested_keys_cannot_hide_a_value() -> None:
     assert check(CANARY, "t", args).effect is Effect.DENY
 
 
-def test_redaction_also_covers_nested_keys() -> None:
-    rules = {"*": {"*": {"denies": "CANARY-[0-9A-F]{4}", "on_violation": "redact"}}}
-    decision = check(rules, "t", {"d": {"CANARY-7F3A": "x"}})
-    assert decision.effect is Effect.ALLOW
-    assert "CANARY-7F3A" not in repr(decision.args)
+def test_key_match_denies_even_when_redaction_is_configured() -> None:
+    # Redacting keys could merge {"SECRET": a, "[REDACTED]": b}; deny instead.
+    rules = {"*": {"*": {"denies": "SECRET", "on_violation": "redact"}}}
+    decision = check(rules, "t", {"d": {"SECRET": "keep", "[REDACTED]": "x"}})
+    assert decision.effect is Effect.DENY
+
+
+def test_denies_also_scans_raw_value_before_nfkc() -> None:
+    rules = {"t": {"s": {"denies": "[^\\x00-\\x7f]"}}}
+    assert check(rules, "t", {"s": "ＳＥＣＲＥＴ"}).effect is Effect.DENY
+
+
+def test_matches_does_not_apply_to_nested_keys() -> None:
+    rules = {"t": {"p": {"matches": "^/workspace/"}}}
+    assert check(rules, "t", {"p": {"path": "/workspace/a"}}).effect is Effect.ALLOW
 
 
 @pytest.mark.parametrize(
@@ -56,6 +66,7 @@ def test_non_json_argument_values_deny(value) -> None:
     ("rule", "value"),
     [
         pytest.param({"allow_hosts": [".example.com"]}, "http://evil.com\\.example.com/", id="backslash-url"),
+        pytest.param({"allow_hosts": ["example.com"]}, "http://evil.com\\@example.com/", id="backslash-userinfo"),
         pytest.param({"allow_hosts": [".example.com"]}, "a@evil.com;x.example.com", id="semicolon-email"),
         pytest.param({"allow_hosts": ["example.com"]}, "a@example.com>", id="angle-bracket"),
         pytest.param({"type": "list", "allow_hosts": [".example.com"]}, ["a@evil.com,b@x.example.com"], id="comma-in-list-item"),
@@ -106,3 +117,12 @@ def test_argument_wildcard_opts_out_of_strict_arguments() -> None:
 
 def test_global_rules_alone_do_not_make_tools_strict() -> None:
     assert check(CANARY, "anything", {"x": 1, "y": "z"}).effect is Effect.ALLOW
+
+
+@pytest.mark.parametrize("key", ["TO", "tо"], ids=["case", "cyrillic-o"])
+def test_strict_arguments_reject_aliased_key_names(key) -> None:
+    # The alias still hits the "to" rule, but a tool would receive it under
+    # another name and fall back to its own default for `to`.
+    rules = {"send_email": {"to": {"required": True, "allow_hosts": ["example.com"]}}}
+    decision = check(rules, "send_email", {key: "a@example.com"})
+    assert decision.effect is Effect.DENY
