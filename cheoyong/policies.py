@@ -130,6 +130,18 @@ def _strings(value: Any):
             yield from _strings(item)
 
 
+def _keys(value: Any):
+    """Every nested dict key, raw and NFKC, so `denies` sees smuggled keys."""
+    if isinstance(value, list):
+        for item in value:
+            yield from _keys(item)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield unicodedata.normalize("NFKC", key)
+            yield from _keys(item)
+
+
 def _redact(value: Any, pattern: re.Pattern[str]) -> Any:
     if isinstance(value, str):
         return pattern.sub("[REDACTED]", unicodedata.normalize("NFKC", value))
@@ -140,9 +152,18 @@ def _redact(value: Any, pattern: re.Pattern[str]) -> Any:
     return value
 
 
+# LDH labels only. Anything else (backslash, ';', '@', IPv6 brackets) is a
+# parser-differential risk between urlsplit and the tool's HTTP/SMTP client.
+_HOSTNAME = re.compile(r"[a-z0-9-]+(\.[a-z0-9-]+)*")
+
+
 def _host(value: str) -> str | None:
     try:
         if "://" in value:
+            if "\\" in value:
+                # urlsplit reads http://evil.com\@example.com as example.com;
+                # requests and browsers treat "\" as "/" and go to evil.com.
+                return None
             host = urlsplit(value).hostname
         elif value.count("@") == 1:
             host = value.rsplit("@", 1)[1]
@@ -150,7 +171,8 @@ def _host(value: str) -> str | None:
             host = value
         if not host or any(char.isspace() for char in host):
             return None
-        return host.casefold().encode("idna").decode("ascii")
+        host = host.casefold().encode("idna").decode("ascii")
+        return host if _HOSTNAME.fullmatch(host) else None
     except (UnicodeError, ValueError):
         return None
 
@@ -167,9 +189,11 @@ def _host_allowed(host: str, entries: tuple[str, ...]) -> bool:
 def arg_rules(rules: dict) -> Policy:
     """Validate normalized args; global rules run before tool-specific rules."""
     prepared: dict[str, dict[str, dict[str, Any]]] = {}
+    names: dict[str, set[str]] = {}
     for raw_tool, arg_map in rules.items():
         tool = raw_tool if raw_tool == "*" else normalize_name(raw_tool)
         prepared[tool] = {}
+        names[tool] = set(arg_map)
         for raw_arg, constraint in arg_map.items():
             arg = raw_arg if raw_arg == "*" else match_arg_key(raw_arg)
             item = dict(constraint)
@@ -196,6 +220,7 @@ def arg_rules(rules: dict) -> Policy:
         value: Any,
         constraint: dict[str, Any],
     ) -> Decision | None:
+        raw_value = call.args.get(raw_arg)
         if constraint.get("required") and value is None:
             return violation(call, arg, "required", value)
         if value is None:
@@ -206,9 +231,15 @@ def arg_rules(rules: dict) -> Policy:
             valid = type(value) is expected
             if not valid:
                 return violation(call, arg, "type", value)
+        if any(key in constraint for key in ("matches", "enum", "allow_hosts")) and (
+            value != raw_value
+        ):
+            # The rule saw the NFKC form but the tool would get the raw form
+            # (e.g. fullwidth "／workspace/" is a relative path). Refuse.
+            return violation(call, arg, "normalization", raw_value)
         if "max_len" in constraint:
             try:
-                too_long = len(value) > constraint["max_len"]
+                too_long = max(len(value), len(raw_value)) > constraint["max_len"]
             except TypeError:
                 too_long = True
             if too_long:
@@ -223,7 +254,13 @@ def arg_rules(rules: dict) -> Policy:
                 return violation(call, arg, "matches", value)
         if "denies" in constraint:
             pattern = constraint["denies"]
-            if any(pattern.search(item) for item in _strings(value)):
+            if any(pattern.search(key) for key in (*_keys(value), *_keys(raw_value))):
+                # A key match always denies: redacting keys could merge them.
+                return violation(call, arg, "denies", value)
+            if any(
+                pattern.search(item)
+                for item in (*_strings(value), *_strings(raw_value))
+            ):
                 if constraint.get("on_violation", "deny") == "redact":
                     args = deepcopy(call.args)
                     args[raw_arg] = _redact(args[raw_arg], pattern)
@@ -266,6 +303,13 @@ def arg_rules(rules: dict) -> Policy:
             ]
             for arg in ordered_args:
                 constraint = tool_rules[arg]
+                if arg == "*" and "denies" in constraint:
+                    for target in values_by_norm:
+                        raw_key = raw_by_norm.get(target, target)
+                        if constraint["denies"].search(raw_key) or constraint[
+                            "denies"
+                        ].search(unicodedata.normalize("NFKC", raw_key)):
+                            return violation(call, target, "denies", raw_key)
                 if arg == "*":
                     targets = tuple(values_by_norm.items())
                 else:
@@ -282,6 +326,17 @@ def arg_rules(rules: dict) -> Policy:
                             match_arg_key(key): value
                             for key, value in call.norm_args.items()
                         }
+            if tool != "*" and tool in prepared and "*" not in tool_rules:
+                # Fail closed on argument smuggling: a tool with argument rules
+                # accepts only the exact argument names it lists. "TO" or a
+                # Cyrillic "tо" still hit the "to" rule above, but the tool
+                # would receive them under a different name, so deny here too.
+                # Add "*": {} to opt out.
+                for raw_key in call.args:
+                    if raw_key not in names[tool]:
+                        return violation(
+                            call, match_arg_key(raw_key), "unexpected argument", raw_key
+                        )
         return redaction
 
     return policy
