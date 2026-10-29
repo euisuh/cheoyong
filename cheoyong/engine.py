@@ -2,7 +2,7 @@ from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pprint import pformat
 import sys
 from threading import Lock
@@ -176,7 +176,7 @@ class Cheoyong:
 
                 self.audit.write(
                     {
-                        "ts": datetime.now(UTC).isoformat(timespec="milliseconds").replace(
+                        "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
                             "+00:00", "Z"
                         ),
                         "cheoyong_version": __version__,
