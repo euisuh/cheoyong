@@ -55,8 +55,19 @@ class Cheoyong:
         self.default = default
         self.audit = audit
         self.escalate = auto_deny if escalate is None else escalate
+        stores = {
+            id(store): store
+            for policy in self.policies
+            if (store := getattr(policy, "store", None)) is not None
+        }
+        if len(stores) > 1:
+            raise ValueError("policies must share one rate-limit store")
+        # A file store doubles as the lock so check and commit are atomic
+        # across processes, not just threads.
         self._commit_lock = (
-            Lock()
+            next(iter(stores.values()))
+            if stores
+            else Lock()
             if any(hasattr(policy, "commit") for policy in self.policies)
             else nullcontext()
         )
@@ -66,10 +77,11 @@ class Cheoyong:
         cls,
         path: str,
         escalate: Callable[[ToolCall, Decision], bool] | None = None,
+        state_dir: str | None = None,
     ) -> "Cheoyong":
         from .loader import load_policy_file
 
-        policies, default, audit = load_policy_file(path)
+        policies, default, audit = load_policy_file(path, state_dir=state_dir)
         return cls(policies, default=default, audit=audit, escalate=escalate)
 
     def check(
@@ -78,8 +90,12 @@ class Cheoyong:
         args: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> Decision:
-        with self._commit_lock:
-            return self._check(tool, args, context)
+        try:
+            with self._commit_lock:
+                return self._check(tool, args, context)
+        except (OSError, ValueError) as exc:
+            # Rate-limit state could not be locked, read, or saved: fail closed.
+            return Decision(Effect.DENY, f"state_error: {exc!r}", "state_error", args)
 
     def _check(
         self,

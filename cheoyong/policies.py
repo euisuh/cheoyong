@@ -1,6 +1,10 @@
-from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from copy import deepcopy
+import fcntl
+import json
+import math
+import os
+from pathlib import Path
 import re
 from threading import Lock
 import time
@@ -61,32 +65,111 @@ def sensitive(tools: Iterable[str]) -> Policy:
     return policy
 
 
+def _reject_constant(name: str) -> float:
+    raise ValueError(f"non-finite number {name} in rate-limit state")
+
+
+class FileWindowStore:
+    """Rate-limit windows shared across processes through a flock'd JSON file.
+
+    Used as the engine's commit lock: entering takes an exclusive flock on
+    `rate_limit.lock` and loads `rate_limit.json`; a clean exit writes a temp
+    file and renames it over the JSON, so a failed write keeps the old state.
+    Lock, read, parse, or write errors raise, and the engine turns them into a
+    DENY.
+    """
+
+    def __init__(self, directory: str | Path) -> None:
+        self.path = Path(directory) / "rate_limit.json"
+        self.data: dict[str, dict[str, list[float]]] = {}
+        self._lock = Lock()
+        self._lock_file = None
+
+    def __enter__(self) -> "FileWindowStore":
+        self._lock.acquire()
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._lock_file = open(self.path.with_suffix(".lock"), "a")  # noqa: SIM115
+            fcntl.flock(self._lock_file, fcntl.LOCK_EX)
+            try:
+                text = self.path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                text = "{}"
+            data = json.loads(text, parse_constant=_reject_constant)
+            if not isinstance(data, dict):
+                raise ValueError(f"{self.path}: not a JSON object")
+            self.data = data
+        except BaseException:
+            self._close()
+            raise
+        return self
+
+    def __exit__(self, exc_type, *_: object) -> None:
+        try:
+            if exc_type is None:
+                tmp = self.path.with_suffix(".tmp")
+                with tmp.open("w", encoding="utf-8") as file:
+                    json.dump(self.data, file)
+                    file.flush()
+                    os.fsync(file.fileno())
+                os.replace(tmp, self.path)
+        finally:
+            self._close()
+
+    def _close(self) -> None:
+        if self._lock_file is not None:
+            self._lock_file.close()  # also releases the flock
+            self._lock_file = None
+        self._lock.release()
+
+
 def rate_limit(
     tool: str,
     max_calls: int,
     per_seconds: float,
     key: Sequence[str] = (),
-    clock: Callable[[], float] = time.monotonic,
+    clock: Callable[[], float] | None = None,
+    store: FileWindowStore | None = None,
 ) -> Policy:
-    """Limit allowed calls per sliding window, optionally keyed by context."""
+    """Limit allowed calls per sliding window, optionally keyed by context.
+
+    Windows live in process memory, or in `store` so separate processes (one
+    hook process per call) share them. A store uses wall-clock time, since
+    monotonic time is not comparable across reboots.
+    """
     norm_tool = normalize_name(tool)
-    windows: dict[tuple[Any, ...], deque[float]] = {}
+    if clock is None:
+        clock = time.monotonic if store is None else time.time
+    memory: dict[Any, list[float]] = {}
     lock = Lock()
 
-    def window_key(call: ToolCall) -> tuple[Any, ...]:
-        return (call.norm_tool, *(call.context.get(name) for name in key))
+    def windows() -> dict[Any, list[float]]:
+        if store is None:
+            return memory
+        return store.data.setdefault(f"rate_limit:{norm_tool}", {})
 
-    def evict(timestamps: deque[float], now: float) -> None:
-        while timestamps and now - timestamps[0] > per_seconds:
-            timestamps.popleft()
+    def window_key(call: ToolCall) -> Any:
+        parts = (call.norm_tool, *(call.context.get(name) for name in key))
+        return parts if store is None else json.dumps(parts, default=str)
+
+    def current(call: ToolCall, now: float) -> list[float]:
+        # ponytail: evicts every key of this tool per call; O(keys), fine to ~10^4.
+        table = windows()
+        for name in list(table):
+            if not isinstance(table[name], list) or not all(
+                type(ts) in (int, float) and math.isfinite(ts) for ts in table[name]
+            ):
+                raise ValueError(f"malformed rate-limit window {name!r}")
+            table[name] = [ts for ts in table[name] if now - ts <= per_seconds]
+            if not table[name]:
+                del table[name]
+        return table.setdefault(window_key(call), [])
 
     def policy(call: ToolCall) -> Decision | None:
         if call.norm_tool != norm_tool:
             return None
         with lock:
-            timestamps = windows.setdefault(window_key(call), deque())
-            evict(timestamps, clock())
-            if len(timestamps) >= max_calls:
+            if len(current(call, clock())) >= max_calls:
                 return Decision(
                     Effect.DENY,
                     f"rate limit {max_calls} calls per {per_seconds} seconds exceeded",
@@ -100,12 +183,10 @@ def rate_limit(
             return
         with lock:
             now = clock()
-            timestamps = windows.setdefault(window_key(call), deque())
-            evict(timestamps, now)
-            timestamps.append(now)
+            current(call, now).append(now)
 
-    # ponytail: in-process; per-key deque is fine to ~10^4 keys.
     policy.commit = commit  # type: ignore[attr-defined]
+    policy.store = store  # type: ignore[attr-defined]
     return policy
 
 
@@ -186,6 +267,27 @@ def _host_allowed(host: str, entries: tuple[str, ...]) -> bool:
     return False
 
 
+def _within(value: Any, roots: tuple[str, ...]) -> bool:
+    """True if `value` is an absolute path whose realpath is under a root.
+
+    ponytail: check-then-use; a symlink swapped in after the check still wins.
+    """
+    if not isinstance(value, str) or not os.path.isabs(value):
+        return False
+    try:
+        resolved = os.path.realpath(value)
+        # Non-strict realpath leaves a symlink in place when it cannot resolve
+        # it (loop, permission); a fully resolved path has none.
+        part = resolved
+        while part != os.path.dirname(part):
+            if os.path.islink(part):
+                return False
+            part = os.path.dirname(part)
+        return any(os.path.commonpath([root, resolved]) == root for root in roots)
+    except (OSError, ValueError):
+        return False
+
+
 def arg_rules(rules: dict) -> Policy:
     """Validate normalized args; global rules run before tool-specific rules."""
     prepared: dict[str, dict[str, dict[str, Any]]] = {}
@@ -203,6 +305,8 @@ def arg_rules(rules: dict) -> Policy:
                 item["denies"] = re.compile(item["denies"])
             if "allow_hosts" in item:
                 item["allow_hosts"] = tuple(item["allow_hosts"])
+            if "within" in item:
+                item["within"] = tuple(os.path.realpath(root) for root in item["within"])
             prepared[tool][arg] = item
 
     def violation(call: ToolCall, arg: str, name: str, value: Any) -> Decision:
@@ -223,6 +327,8 @@ def arg_rules(rules: dict) -> Policy:
         raw_value = call.args.get(raw_arg)
         if constraint.get("required") and value is None:
             return violation(call, arg, "required", value)
+        if value is None and "within" in constraint and raw_arg in call.args:
+            return violation(call, arg, "within", value)  # explicit null
         if value is None:
             return None
         type_name = constraint.get("type")
@@ -231,7 +337,9 @@ def arg_rules(rules: dict) -> Policy:
             valid = type(value) is expected
             if not valid:
                 return violation(call, arg, "type", value)
-        if any(key in constraint for key in ("matches", "enum", "allow_hosts")) and (
+        if any(
+            key in constraint for key in ("matches", "enum", "allow_hosts", "within")
+        ) and (
             value != raw_value
         ):
             # The rule saw the NFKC form but the tool would get the raw form
@@ -289,6 +397,8 @@ def arg_rules(rules: dict) -> Policy:
                 host = _host(item)
                 if host is None or not _host_allowed(host, constraint["allow_hosts"]):
                     return violation(call, arg, "allow_hosts", item)
+        if "within" in constraint and not _within(value, constraint["within"]):
+            return violation(call, arg, "within", value)
         return redaction
 
     def policy(call: ToolCall) -> Decision | None:
