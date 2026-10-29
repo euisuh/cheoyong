@@ -1,0 +1,48 @@
+# Example Cheoyong policy for Claude Code's PreToolUse hook.
+# Replace /home/you/src/ with the directory Claude may write to.
+# Unlisted tools (including every mcp__* tool) are denied by `default: deny`.
+version: 1
+default: deny
+tools:
+  Read:
+    allow: true
+    args:
+      file_path: {type: str, required: true, denies: '(^|/)(\.env|\.ssh|\.aws|id_rsa)'}
+      "*": {}
+  Glob: {allow: true}
+  Grep: {allow: true}
+  TodoWrite: {allow: true}
+  WebSearch: {allow: true}
+  Write:
+    allow: true
+    args:
+      file_path: {type: str, required: true, matches: '^/home/you/src/'}
+      "*": {}
+  Edit:
+    allow: true
+    args:
+      file_path: {type: str, required: true, matches: '^/home/you/src/'}
+      "*": {}
+  WebFetch:
+    allow: true
+    args:
+      url: {type: str, required: true, allow_hosts: [docs.python.org, github.com, .github.com]}
+      "*": {}
+  Bash:
+    allow: true
+    # Strict argument list: any other field (for example a sandbox override)
+    # is denied as an unexpected argument.
+    args:
+      command:
+        type: str
+        required: true
+        denies: '\brm\s+-\w*[rf]\w*[rf]|\bgit\s+push\b.*(--force|\s-f\b)|\|\s*(ba|z)?sh\b|\bsudo\b'
+      description: {type: str}
+      timeout: {type: int}
+      run_in_background: {type: bool}
+  # Subagent launches go to Claude Code's own permission prompt ("ask").
+  Task: {allow: true, sensitive: true}
+  Agent: {allow: true, sensitive: true}
+  "*":
+    args:
+      "*": {denies: 'AKIA[0-9A-Z]{16}'}
