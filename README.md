@@ -101,8 +101,8 @@ sensitive:submit_order
 | `default` | Required. `deny` or `allow` for calls no rule decides. |
 | `tools.<name>.allow` | `true` adds the tool to the allowlist, `false` to the denylist. |
 | `tools.<name>.sensitive` | Escalate: the `escalate` callback must return `True` or the call is denied. |
-| `tools.<name>.rate_limit` | `{max, per_seconds, key}`; sliding window, keyed by `context` fields. In-process only. |
-| `tools.<name>.args.<arg>` | Constraints: `required`, `type` (`str int float bool list dict`, exact type, so `True` is not an `int`), `max_len`, `enum`, `matches` (regex, every string must match, `..` denied), `denies` (regex, any string or key matching denies), `allow_hosts` (exact host, or `.suffix` for subdomains), `on_violation: redact` (for `denies`, replace the match instead of denying). |
+| `tools.<name>.rate_limit` | `{max, per_seconds, key}`; sliding window, keyed by `context` fields. In process memory, or in a file when loaded with `state_dir` (the hook always does). |
+| `tools.<name>.args.<arg>` | Constraints: `required`, `type` (`str int float bool list dict`, exact type, so `True` is not an `int`), `max_len`, `enum`, `matches` (regex, every string must match, `..` denied), `denies` (regex, any string or key matching denies), `allow_hosts` (exact host, or `.suffix` for subdomains), `within` (list of absolute directories; the value must be an absolute path whose `os.path.realpath` is inside one of them), `on_violation: redact` (for `denies`, replace the match instead of denying). |
 | `tools.<name>.args."*"` | Constraint applied to every argument. An empty `"*": {}` turns off strict arguments for that tool. |
 | `tools."*".args."*"` | Constraint applied to every argument of every tool. |
 
@@ -125,7 +125,7 @@ Execute with `decision.args`, not the original dict, so redactions take effect. 
 Argument rules, in more detail:
 
 - Rules run on the NFKC form, so fullwidth `ＳＥＣＲＥＴ` hits `denies: SECRET`. `denies` also checks the raw form.
-- `matches`, `enum` and `allow_hosts` deny a value whose raw form differs from its NFKC form, because the tool receives the raw form. Fullwidth `／workspace/x` would otherwise pass `^/workspace/` and be a relative path.
+- `matches`, `enum`, `allow_hosts` and `within` deny a value whose raw form differs from its NFKC form, because the tool receives the raw form. Fullwidth `／workspace/x` would otherwise pass `^/workspace/` and be a relative path.
 - A tool that has argument rules accepts only arguments it names, compared by exact raw name. `bcc` on `send_email`, or `TO` / Cyrillic `tо` in place of `to`, deny as unexpected.
 - `allow_hosts` extracts the host with `urlsplit` for URLs, or the part after `@` for addresses, then requires a plain LDH hostname after IDNA encoding. Commas and whitespace in a single-string value, backslashes in a URL, and characters such as `;`, `<`, `[` in the host deny. IPv6 literals are not supported and deny.
 
@@ -168,6 +168,8 @@ The same applies to any loop that yields a tool name and an argument dict (OpenA
 
 Errors exit 2, not 1, because Claude Code treats exit 1 as a non-blocking error and would run the tool.
 
+`rate_limit` windows persist between hook processes in `--state-dir` (default `$CHEOYONG_STATE_DIR`, else `$XDG_STATE_HOME/cheoyong`, else `~/.local/state/cheoyong`). The file is only touched when the policy has a `rate_limit`.
+
 [`examples/claude-code/policy.yaml`](examples/claude-code/policy.yaml) is a starting policy: reads anywhere except `.env`/`.ssh`/`.aws`/`id_rsa`, writes and edits only under one directory, `WebFetch` to a host list, a few `Bash` command patterns denied, `Task`/`Agent` routed to "ask", everything else (including all `mcp__*` tools) denied. Register it as in [`examples/claude-code/settings.json`](examples/claude-code/settings.json). Running it on sample events:
 
 ```text
@@ -180,7 +182,7 @@ $ echo '{"tool_name":"Bash","tool_input":{"command":"ls","dangerouslyDisableSand
 cheoyong: denied by arg_rules:bash.dangerouslydisablesandbox: unexpected argument violation for value 'dangerouslyDisableSandbox'
 exit=2
 $ echo '{"tool_name":"Write","tool_input":{"file_path":"/home/you/src/../.bashrc","content":"x"}}' | cheoyong-hook --policy examples/claude-code/policy.yaml
-cheoyong: denied by arg_rules:write.file_path: matches violation for value '/home/you/src/../.bashrc'
+cheoyong: denied by arg_rules:write.file_path: within violation for value '/home/you/src/../.bashrc'
 exit=2
 $ echo '{"tool_name":"mcp__gmail__send","tool_input":{}}' | cheoyong-hook --policy examples/claude-code/policy.yaml
 cheoyong: denied by default: default
@@ -222,7 +224,7 @@ In scope, with tests (`tests/test_bypass.py`, `tests/test_normalize.py`, `tests/
 - Argument-key confusables, case variants, and extra arguments smuggled past per-argument rules.
 - Secrets hidden in nested values, nested keys, top-level keys, or non-JSON containers.
 - Host spoofing in URLs and addresses: userinfo, comma or semicolon recipient lists, backslash parser differentials, subdomains.
-- Path traversal with `..` under `matches`, and NFKC differences between what is checked and what is executed.
+- Path traversal with `..` under `matches`, symlinks pointing out of a `within` root (`tests/test_within.py`), and NFKC differences between what is checked and what is executed.
 - Failure handling: malformed policy, policy exceptions, escalation errors, and oversized inputs deny.
 
 ## Non-goals
@@ -235,9 +237,10 @@ In scope, with tests (`tests/test_bypass.py`, `tests/test_normalize.py`, `tests/
 ## Limitations
 
 - `matches` uses `re.search`. Anchor with `^`; prefer `\Z` over `$`, since `$` also matches before a trailing newline.
-- `matches` denies `..` but does not resolve symlinks, and paths are compared as strings. `/workspace/link-to-etc/passwd` passes `^/workspace/`.
+- `matches` denies `..` but does not resolve symlinks, and paths are compared as strings. `/workspace/link-to-etc/passwd` passes `^/workspace/`; use `within: [/workspace]` for paths.
+- `within` resolves the path when the call is checked, not when the tool opens it. A symlink created or swapped in between still wins (check-then-use race). Roots are resolved once, when the policy loads.
 - `allow_hosts` checks the host only. Scheme, port, path, and query are not restricted; a canary in the query needs a `denies` rule.
-- Rate limits live in process memory. In the Claude Code hook each call is a new process, so `rate_limit` has no effect there.
+- Hook rate limits share one JSON file (`<state-dir>/rate_limit.json`) under an exclusive `flock`, so every call through the hook waits on that lock when the policy has a `rate_limit`. POSIX only. If the file cannot be locked, read, parsed, or written, every call is denied until it is fixed or deleted. Windows use wall-clock time, so a clock jump changes them.
 - `on_violation: redact` cannot be used through the hook (the call is blocked instead).
 - Harm that fits inside allowed tools and arguments is still possible: a permitted email can still be misleading.
 - Anyone who can edit the policy file can disable it.

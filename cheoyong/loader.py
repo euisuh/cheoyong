@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -12,7 +13,14 @@ from typing import Any
 import yaml
 
 from .audit import AuditLog
-from .policies import arg_rules, rate_limit, sensitive, tool_allowlist, tool_denylist
+from .policies import (
+    FileWindowStore,
+    arg_rules,
+    rate_limit,
+    sensitive,
+    tool_allowlist,
+    tool_denylist,
+)
 from .types import Effect, Policy, PolicyError
 
 
@@ -27,6 +35,7 @@ _ARG_KEYS = {
     "denies",
     "allow_hosts",
     "on_violation",
+    "within",
 }
 _RATE_KEYS = {"max", "per_seconds", "key"}
 _AUDIT_KEYS = {"path", "redact"}
@@ -74,6 +83,15 @@ def _validate_constraint(value: Any, path: str) -> dict[str, Any]:
         )
     ):
         raise _error(f"{path}.allow_hosts", "must be a list of non-empty strings")
+    if "within" in constraint and (
+        not isinstance(constraint["within"], list)
+        or not constraint["within"]
+        or any(
+            not isinstance(root, str) or not os.path.isabs(root)
+            for root in constraint["within"]
+        )
+    ):
+        raise _error(f"{path}.within", "must be a non-empty list of absolute paths")
     if "enum" in constraint and not isinstance(constraint["enum"], list):
         raise _error(f"{path}.enum", "must be a list")
     if "required" in constraint and not isinstance(constraint["required"], bool):
@@ -144,8 +162,14 @@ def _named(policy: Policy, name: str) -> Policy:
     return policy
 
 
-def load_policy_file(path: str | Path) -> tuple[list[Policy], Effect, AuditLog | None]:
-    """Load and fully validate a policy file before returning any policies."""
+def load_policy_file(
+    path: str | Path, state_dir: str | Path | None = None
+) -> tuple[list[Policy], Effect, AuditLog | None]:
+    """Load and fully validate a policy file before returning any policies.
+
+    With `state_dir`, rate-limit windows persist in a file there and are shared
+    by every process that uses the same directory.
+    """
     data = _load(Path(path))
     _reject_unknown(data, _TOP_KEYS, "")
     if data.get("version") != 1 or type(data.get("version")) is not int:
@@ -213,6 +237,7 @@ def load_policy_file(path: str | Path) -> tuple[list[Policy], Effect, AuditLog |
             _named(arg_rules(specific_args), f"arg_rules:{','.join(specific_args)}")
         )
 
+    store = FileWindowStore(state_dir) if state_dir is not None else None
     for name, block in validated.items():
         if name == "*" or "rate_limit" not in block:
             continue
@@ -220,7 +245,11 @@ def load_policy_file(path: str | Path) -> tuple[list[Policy], Effect, AuditLog |
         policies.append(
             _named(
                 rate_limit(
-                    name, rate["max"], rate["per_seconds"], rate.get("key", [])
+                    name,
+                    rate["max"],
+                    rate["per_seconds"],
+                    rate.get("key", []),
+                    store=store,
                 ),
                 f"rate_limit:{name}",
             )
