@@ -103,6 +103,7 @@ class Decision:
     reason: str
     policy: str
     args: dict[str, Any]
+    rewrite_only: bool = False  # args changed, but not a verdict: default/allowlist still decides
 
 
 Policy: TypeAlias = Callable[[ToolCall], Decision | None]
