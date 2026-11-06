@@ -120,6 +120,7 @@ class Cheoyong:
                 )
                 return decision
             decided: Decision | None = None
+            rewrite: Decision | None = None
             escalation: Decision | None = None
 
             for policy in self.policies:
@@ -134,6 +135,8 @@ class Cheoyong:
                     if result.effect is Effect.ESCALATE:
                         escalation = result
                         escalated = True
+                    elif result.rewrite_only:
+                        rewrite = result
                     else:
                         decided = result
                 except Exception as exc:
@@ -168,7 +171,10 @@ class Cheoyong:
                     )
             if decision is None:
                 decision = decided or Decision(
-                    self.default, "default", "default", call.args
+                    self.default,
+                    rewrite.reason if rewrite else "default",
+                    rewrite.policy if rewrite else "default",
+                    call.args,
                 )
             if decision.effect is not Effect.ALLOW:
                 return decision

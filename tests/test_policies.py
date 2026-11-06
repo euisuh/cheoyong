@@ -190,3 +190,29 @@ def test_argument_wildcard_runs_before_specific_argument_rule() -> None:
     )
     assert decision.effect is Effect.DENY
     assert decision.args["body"] == "BLOCK"
+
+
+def test_redaction_does_not_override_default_deny() -> None:
+    wall = Cheoyong(
+        [arg_rules({"send_email": {"body": {"denies": "secret", "on_violation": "redact"}}})],
+        default=Effect.DENY,
+    )
+    assert wall.check("send_email", {"body": "hello"}).effect is Effect.DENY
+    redacted = wall.check("send_email", {"body": "my secret"})
+    assert redacted.effect is Effect.DENY
+    assert redacted.args["body"] == "my [REDACTED]"
+
+
+def test_redaction_with_allowlist_still_allows() -> None:
+    from cheoyong.policies import tool_allowlist
+
+    wall = Cheoyong(
+        [
+            arg_rules({"send_email": {"body": {"denies": "secret", "on_violation": "redact"}}}),
+            tool_allowlist(["send_email"]),
+        ],
+        default=Effect.DENY,
+    )
+    decision = wall.check("send_email", {"body": "my secret"})
+    assert decision.effect is Effect.ALLOW
+    assert decision.args["body"] == "my [REDACTED]"
