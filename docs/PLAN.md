@@ -143,7 +143,7 @@ not. It governs only calls routed through `check()`/`call()`. It therefore does
 ```
 cheoyong/
 ├── README.md              # the sales pitch — under a minute to read (M8)
-├── PLAN.md                # this file
+├── docs/PLAN.md           # this file
 ├── LICENSE                # MIT
 ├── pyproject.toml         # hatchling; runtime dep: pyyaml. extras: llm, dev
 ├── cheoyong/
@@ -300,7 +300,7 @@ stays green.
 > agnostic Python library that sits between an LLM agent's decision to call a
 > tool and the tool executing, and returns an allow/deny/escalate Decision based
 > on policies over `(tool_name, args, context)`. Python 3.11+, `pytest`, package
-> import name `cheoyong`. Read `PLAN.md` §2, §3 and §5 for the integration
+> import name `cheoyong`. Read `docs/PLAN.md` §2, §3 and §5 for the integration
 > point, core abstractions, evaluation contract, and policy semantics before
 > writing code; follow them exactly. The only runtime dependency permitted is
 > `pyyaml` — do not add others. Do not add abstractions the plan does not call

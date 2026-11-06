@@ -1,6 +1,34 @@
 # Cheoyong
 
-A policy layer for LLM agent tool calls: allow, deny, rate-limit, escalate, and audit, decided before the tool runs. Formerly `agent-toolwall`.
+A policy layer for LLM agent tool calls: allow, deny, rate-limit, escalate, and audit, decided before the tool runs.
+
+## Quick start
+
+From a clone:
+
+```sh
+pip install -e .            # library, cheoyong-demo, cheoyong-hook
+```
+
+Register the Claude Code hook using [`examples/claude-code/settings.json`](examples/claude-code/settings.json). Replace the policy path with the absolute path to [`examples/claude-code/policy.yaml`](examples/claude-code/policy.yaml):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cheoyong-hook --policy /home/you/.claude/cheoyong-policy.yaml"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
 [![CI](https://github.com/euisuh/cheoyong/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/euisuh/cheoyong/actions/workflows/ci.yml)
 
@@ -248,3 +276,5 @@ In scope, with tests (`tests/test_bypass.py`, `tests/test_normalize.py`, `tests/
 ## Relationship to gumiho
 
 [`gumiho`](https://github.com/euisuh/gumiho) measures whether indirect prompt injection persuades models and how mitigations change attack success. This repository is the enforcement side: given a concrete tool call, decide before the side effect. The demo mirrors gumiho's threat shapes without importing its code or claiming susceptibility rates.
+
+Formerly known as agent-toolwall.
