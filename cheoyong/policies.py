@@ -377,6 +377,7 @@ def arg_rules(rules: dict) -> Policy:
                         f"denies violation redacted value {value!r}",
                         f"arg_rules:{call.norm_tool}.{arg}",
                         args,
+                        rewrite_only=True,
                     )
                     value = _redact(value, pattern)
                 else:
